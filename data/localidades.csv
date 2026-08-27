@@ -1,1 +1,6 @@
-
+id_pdl,nombre,lat,lon,poblacion,estado
+PDL-TEJ-001,Tejupilco de Hidalgo,18.905,-100.153,30967,parcial
+PDL-TEJ-002,Bejucos,18.815,-100.420,2437,parcial
+PDL-TEJ-003,San Andrés Ocotepec,18.940,-100.105,1826,parcial
+PDL-TEJ-004,Santo Domingo-Zacatepec,18.895,-100.170,3220,parcial
+PDL-TEJ-005,Rincón de Aguirre,18.900,-100.120,1700,parcial
