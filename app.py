@@ -1,7 +1,4 @@
-from pathlib import Path
-import py_compile
-
-app_code = r'''from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional
@@ -80,11 +77,6 @@ def aplicar_estilos() -> None:
             background: rgba(14, 116, 144, 0.12);
             margin: 8px 0 18px 0;
         }
-
-        .pdl-muted {
-            opacity: .72;
-            font-size: .92rem;
-        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -101,7 +93,7 @@ def cargar_localidades() -> pd.DataFrame:
     Carga la base de localidades del PDM Tejupilco 2025-2027.
 
     Prioridad:
-    1. Archivo local incluido en el repositorio.
+    1. Archivo local dentro del repositorio.
     2. Fallback al archivo RAW de GitHub.
     """
 
@@ -113,7 +105,7 @@ def cargar_localidades() -> pd.DataFrame:
         except Exception as exc:
             st.error(
                 "No fue posible cargar `data/localidades_tejupilco_2025.csv` "
-                "ni recuperar su copia desde GitHub."
+                "ni su copia RAW desde GitHub."
             )
             st.exception(exc)
             st.stop()
@@ -122,19 +114,16 @@ def cargar_localidades() -> pd.DataFrame:
 
     if faltantes:
         st.error(
-            "El CSV no tiene la estructura esperada. "
-            "Faltan las columnas: "
+            "El CSV no tiene la estructura esperada. Faltan: "
             + ", ".join(sorted(faltantes))
         )
         st.stop()
 
     df = df.copy()
 
-    # Normalización nominal.
     df["localidad"] = df["localidad"].astype(str).str.strip()
     df["fuente"] = df["fuente"].astype(str).str.strip()
 
-    # Conversión numérica segura.
     columnas_numericas = [
         "no",
         "poblacion_total",
@@ -148,7 +137,6 @@ def cargar_localidades() -> pd.DataFrame:
     for columna in columnas_numericas:
         df[columna] = pd.to_numeric(df[columna], errors="coerce")
 
-    # Identificador interno PDL.
     df["id_pdl"] = df["no"].apply(
         lambda valor: (
             f"PDL-TEJ-{int(valor):03d}"
@@ -157,19 +145,19 @@ def cargar_localidades() -> pd.DataFrame:
         )
     )
 
-    # Cobertura del desglose por sexo.
     df["desglose_sexo_disponible"] = (
         df["poblacion_femenina"].notna()
         & df["poblacion_masculina"].notna()
     )
 
-    # Consistencia aritmética cuando existen ambos datos.
     df["suma_sexo"] = (
         df["poblacion_femenina"].fillna(0)
         + df["poblacion_masculina"].fillna(0)
     )
 
-    df["diferencia_sexo"] = df["poblacion_total"] - df["suma_sexo"]
+    df["diferencia_sexo"] = (
+        df["poblacion_total"] - df["suma_sexo"]
+    )
 
     df.loc[
         ~df["desglose_sexo_disponible"],
@@ -182,13 +170,11 @@ def cargar_localidades() -> pd.DataFrame:
 @st.cache_data(ttl=3600)
 def cargar_georreferencia() -> Optional[pd.DataFrame]:
     """
-    Carga una capa opcional de georreferencia.
+    Carga opcionalmente data/localidades_georef.csv.
 
     Formatos aceptados:
     - no,lat,lon
     - localidad,lat,lon
-
-    Mientras el archivo no exista, la aplicación sigue funcionando.
     """
 
     if not GEO_CSV.exists():
@@ -207,14 +193,8 @@ def cargar_georreferencia() -> Optional[pd.DataFrame]:
 
 
 def integrar_georreferencia(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Integra latitud/longitud si ya vienen en la base o si existe
-    data/localidades_georef.csv.
-    """
-
     base = df.copy()
 
-    # Si el CSV principal ya tiene lat/lon, se respetan.
     if {"lat", "lon"}.issubset(base.columns):
         base["lat"] = pd.to_numeric(base["lat"], errors="coerce")
         base["lon"] = pd.to_numeric(base["lon"], errors="coerce")
@@ -229,18 +209,16 @@ def integrar_georreferencia(df: pd.DataFrame) -> pd.DataFrame:
 
     if "no" in geo.columns:
         geo["no"] = pd.to_numeric(geo["no"], errors="coerce")
-        columnas = ["no", "lat", "lon"]
         return base.merge(
-            geo[columnas].drop_duplicates("no"),
+            geo[["no", "lat", "lon"]].drop_duplicates("no"),
             on="no",
             how="left",
         )
 
     if "localidad" in geo.columns:
         geo["localidad"] = geo["localidad"].astype(str).str.strip()
-        columnas = ["localidad", "lat", "lon"]
         return base.merge(
-            geo[columnas].drop_duplicates("localidad"),
+            geo[["localidad", "lat", "lon"]].drop_duplicates("localidad"),
             on="localidad",
             how="left",
         )
@@ -276,26 +254,30 @@ def asegurar_localidad_activa(df: pd.DataFrame) -> None:
     actual = st.session_state.get("localidad_activa")
 
     if actual not in nombres:
-        if LOCALIDAD_INICIAL in nombres:
-            st.session_state["localidad_activa"] = LOCALIDAD_INICIAL
-        else:
-            st.session_state["localidad_activa"] = nombres[0]
+        st.session_state["localidad_activa"] = (
+            LOCALIDAD_INICIAL
+            if LOCALIDAD_INICIAL in nombres
+            else nombres[0]
+        )
 
 
 def obtener_registro_activo(df: pd.DataFrame) -> pd.Series:
     asegurar_localidad_activa(df)
 
     localidad = st.session_state["localidad_activa"]
-
     coincidencias = df[df["localidad"] == localidad]
 
-    if coincidencias.empty:
-        return df.iloc[0]
+    return (
+        coincidencias.iloc[0]
+        if not coincidencias.empty
+        else df.iloc[0]
+    )
 
-    return coincidencias.iloc[0]
 
-
-def ranking_poblacion(df: pd.DataFrame, localidad: str) -> Optional[int]:
+def ranking_poblacion(
+    df: pd.DataFrame,
+    localidad: str,
+) -> Optional[int]:
     ranking = (
         df[["localidad", "poblacion_total"]]
         .sort_values("poblacion_total", ascending=False)
@@ -306,10 +288,7 @@ def ranking_poblacion(df: pd.DataFrame, localidad: str) -> Optional[int]:
         ranking["localidad"].eq(localidad)
     ].tolist()
 
-    if not posiciones:
-        return None
-
-    return posiciones[0] + 1
+    return posiciones[0] + 1 if posiciones else None
 
 
 # =========================================================
@@ -377,23 +356,34 @@ def render_sidebar(df: pd.DataFrame) -> str:
 
 def render_header(df: pd.DataFrame) -> None:
     total_localidades = len(df)
-    poblacion_total = int(df["poblacion_total"].fillna(0).sum())
+    poblacion_total = int(
+        df["poblacion_total"].fillna(0).sum()
+    )
 
-    con_poblacion = int(df["poblacion_total"].notna().sum())
+    con_poblacion = int(
+        df["poblacion_total"].notna().sum()
+    )
+
     cobertura_poblacion = (
         con_poblacion / total_localidades * 100
         if total_localidades
         else 0
     )
 
-    con_sexo = int(df["desglose_sexo_disponible"].sum())
+    con_sexo = int(
+        df["desglose_sexo_disponible"].sum()
+    )
 
     cabecera = df[
         df["localidad"].eq("Tejupilco de Hidalgo")
     ]
 
     pct_cabecera = (
-        float(cabecera.iloc[0]["pct_del_total_municipal"])
+        float(
+            cabecera.iloc[0][
+                "pct_del_total_municipal"
+            ]
+        )
         if not cabecera.empty
         else None
     )
@@ -403,26 +393,16 @@ def render_header(df: pd.DataFrame) -> None:
 
     c1, c2, c3, c4, c5 = st.columns(5)
 
-    c1.metric(
-        "Localidades",
-        f"{total_localidades:,}",
-    )
-
-    c2.metric(
-        "Población base",
-        f"{poblacion_total:,}",
-    )
-
+    c1.metric("Localidades", f"{total_localidades:,}")
+    c2.metric("Población base", f"{poblacion_total:,}")
     c3.metric(
         "Cobertura poblacional",
         f"{cobertura_poblacion:.1f} %",
     )
-
     c4.metric(
         "Desglose por sexo",
         f"{con_sexo}/{total_localidades}",
     )
-
     c5.metric(
         "Peso de la cabecera",
         formato_porcentaje(pct_cabecera),
@@ -440,10 +420,11 @@ def render_inicio(df: pd.DataFrame) -> None:
 
     st.write(
         """
-        Esta primera capa integra el universo de localidades y la estructura
-        poblacional publicada en el PDM Tejupilco 2025-2027. Los módulos
-        territoriales, de diagnóstico, planeación, PbR/MIR y gestión se
-        conectarán progresivamente sobre la misma localidad activa.
+        Esta primera capa integra el universo de localidades y
+        la estructura poblacional publicada en el PDM
+        Tejupilco 2025-2027. Los módulos territoriales,
+        de diagnóstico, planeación, PbR/MIR y gestión se
+        conectan sobre la misma localidad activa.
         """
     )
 
@@ -474,9 +455,14 @@ def render_inicio(df: pd.DataFrame) -> None:
     with derecha:
         st.subheader("Lectura rápida")
 
-        poblacion_total = int(df["poblacion_total"].sum())
+        poblacion_total = int(
+            df["poblacion_total"].fillna(0).sum()
+        )
+
         cabecera = df.loc[
-            df["localidad"].eq("Tejupilco de Hidalgo"),
+            df["localidad"].eq(
+                "Tejupilco de Hidalgo"
+            ),
             "poblacion_total",
         ]
 
@@ -501,8 +487,8 @@ def render_inicio(df: pd.DataFrame) -> None:
         )
 
         st.caption(
-            "Los indicadores mostrados aquí proceden únicamente "
-            "de la base poblacional actualmente cargada."
+            "Los indicadores mostrados aquí proceden "
+            "únicamente de la base poblacional cargada."
         )
 
     st.subheader("Arquitectura funcional")
@@ -528,7 +514,10 @@ def render_territorio(df: pd.DataFrame) -> None:
         subset=["lat", "lon"]
     ).copy()
 
-    col_mapa, col_capas = st.columns([4, 1], gap="large")
+    col_mapa, col_capas = st.columns(
+        [4, 1],
+        gap="large",
+    )
 
     with col_capas:
         st.subheader("Capas")
@@ -538,73 +527,50 @@ def render_territorio(df: pd.DataFrame) -> None:
             value=True,
         )
 
-        st.checkbox(
+        for etiqueta in [
             "Secciones electorales",
-            value=False,
-            disabled=True,
-        )
-
-        st.checkbox(
             "Carreteras",
-            value=False,
-            disabled=True,
-        )
-
-        st.checkbox(
             "Escuelas",
-            value=False,
-            disabled=True,
-        )
-
-        st.checkbox(
             "Salud",
-            value=False,
-            disabled=True,
-        )
-
-        st.checkbox(
             "DENUE",
-            value=False,
-            disabled=True,
-        )
-
-        st.checkbox(
             "Obras",
-            value=False,
-            disabled=True,
-        )
+        ]:
+            st.checkbox(
+                etiqueta,
+                value=False,
+                disabled=True,
+            )
 
         st.caption(
-            "Las capas se activarán conforme se incorporen "
-            "sus fuentes geoespaciales."
+            "Las capas se activarán conforme se "
+            "incorporen sus fuentes geoespaciales."
         )
 
     with col_mapa:
         if geo.empty:
             st.warning(
-                "La base poblacional todavía no contiene coordenadas. "
-                "El dashboard ya está preparado para usar "
-                "`data/localidades_georef.csv` con columnas "
-                "`no,lat,lon` o `localidad,lat,lon`."
+                "La base poblacional todavía no contiene "
+                "coordenadas."
             )
 
             st.info(
-                "Mientras incorporamos la georreferencia oficial, "
-                "el módulo Territorio conserva la segmentación por localidad "
-                "sin inventar posiciones geográficas."
+                "El módulo ya acepta "
+                "`data/localidades_georef.csv` con "
+                "`no,lat,lon` o `localidad,lat,lon`. "
+                "No se inventan posiciones geográficas."
             )
 
-            top = (
-                territorial.nlargest(20, "poblacion_total")
+            top = territorial.nlargest(
+                20,
+                "poblacion_total",
+            )[
                 [
-                    [
-                        "id_pdl",
-                        "localidad",
-                        "poblacion_total",
-                        "pct_del_total_municipal",
-                    ]
+                    "id_pdl",
+                    "localidad",
+                    "poblacion_total",
+                    "pct_del_total_municipal",
                 ]
-            )
+            ]
 
             st.dataframe(
                 top,
@@ -612,63 +578,68 @@ def render_territorio(df: pd.DataFrame) -> None:
                 hide_index=True,
             )
 
-        else:
-            layers = []
+            return
 
-            if localidades_on:
-                layers.append(
-                    pdk.Layer(
-                        "ScatterplotLayer",
-                        data=geo,
-                        get_position="[lon, lat]",
-                        get_radius=450,
-                        radius_min_pixels=5,
-                        radius_max_pixels=18,
-                        get_fill_color="[0, 190, 190, 185]",
-                        get_line_color="[255, 255, 255, 180]",
-                        line_width_min_pixels=1,
-                        stroked=True,
-                        filled=True,
-                        pickable=True,
-                        auto_highlight=True,
-                    )
-                )
+        layers = []
 
-            lat_centro = float(geo["lat"].mean())
-            lon_centro = float(geo["lon"].mean())
-
-            deck = pdk.Deck(
-                layers=layers,
-                initial_view_state=pdk.ViewState(
-                    latitude=lat_centro,
-                    longitude=lon_centro,
-                    zoom=9.2,
-                    pitch=0,
-                    bearing=0,
-                ),
-                tooltip={
-                    "html": (
-                        "<b>{localidad}</b><br/>"
-                        "Población: {poblacion_total}<br/>"
-                        "Participación municipal: "
-                        "{pct_del_total_municipal}%"
+        if localidades_on:
+            layers.append(
+                pdk.Layer(
+                    "ScatterplotLayer",
+                    data=geo,
+                    get_position="[lon, lat]",
+                    get_radius=450,
+                    radius_min_pixels=5,
+                    radius_max_pixels=18,
+                    get_fill_color=(
+                        "[0, 190, 190, 185]"
                     ),
-                    "style": {
-                        "backgroundColor": "#0f172a",
-                        "color": "white",
-                    },
+                    get_line_color=(
+                        "[255, 255, 255, 180]"
+                    ),
+                    line_width_min_pixels=1,
+                    stroked=True,
+                    filled=True,
+                    pickable=True,
+                    auto_highlight=True,
+                )
+            )
+
+        lat_centro = float(geo["lat"].mean())
+        lon_centro = float(geo["lon"].mean())
+
+        deck = pdk.Deck(
+            layers=layers,
+            initial_view_state=pdk.ViewState(
+                latitude=lat_centro,
+                longitude=lon_centro,
+                zoom=9.2,
+                pitch=0,
+                bearing=0,
+            ),
+            tooltip={
+                "html": (
+                    "<b>{localidad}</b><br/>"
+                    "Población: {poblacion_total}<br/>"
+                    "Participación municipal: "
+                    "{pct_del_total_municipal}%"
+                ),
+                "style": {
+                    "backgroundColor": "#0f172a",
+                    "color": "white",
                 },
-            )
+            },
+        )
 
-            st.pydeck_chart(
-                deck,
-                use_container_width=True,
-            )
+        st.pydeck_chart(
+            deck,
+            use_container_width=True,
+        )
 
-            st.caption(
-                f"{len(geo)} localidades cuentan actualmente "
-                "con coordenadas utilizables."
-            )
+        st.caption(
+            f"{len(geo)} localidades cuentan "
+            "con coordenadas utilizables."
+        )
 
 
 # =========================================================
@@ -681,24 +652,32 @@ def render_localidades(df: pd.DataFrame) -> None:
     registro = obtener_registro_activo(df)
     nombre = registro["localidad"]
 
-    posicion = ranking_poblacion(df, nombre)
+    posicion = ranking_poblacion(
+        df,
+        nombre,
+    )
 
     st.subheader(nombre)
     st.caption(
-        f"{registro['id_pdl']} · Fuente base: {registro['fuente']}"
+        f"{registro['id_pdl']} · "
+        f"Fuente base: {registro['fuente']}"
     )
 
     c1, c2, c3, c4 = st.columns(4)
 
     c1.metric(
         "Población",
-        formato_entero(registro["poblacion_total"]),
+        formato_entero(
+            registro["poblacion_total"]
+        ),
     )
 
     c2.metric(
         "Participación municipal",
         formato_porcentaje(
-            registro["pct_del_total_municipal"]
+            registro[
+                "pct_del_total_municipal"
+            ]
         ),
     )
 
@@ -715,24 +694,36 @@ def render_localidades(df: pd.DataFrame) -> None:
         "Desglose por sexo",
         (
             "Disponible"
-            if bool(registro["desglose_sexo_disponible"])
+            if bool(
+                registro[
+                    "desglose_sexo_disponible"
+                ]
+            )
             else "Parcial"
         ),
     )
 
     st.divider()
 
-    izquierda, derecha = st.columns([1, 1])
+    izquierda, derecha = st.columns(2)
 
     with izquierda:
         st.subheader("Composición poblacional")
 
-        if bool(registro["desglose_sexo_disponible"]):
+        if bool(
+            registro[
+                "desglose_sexo_disponible"
+            ]
+        ):
             composicion = pd.DataFrame(
                 {
                     "Población": [
-                        registro["poblacion_femenina"],
-                        registro["poblacion_masculina"],
+                        registro[
+                            "poblacion_femenina"
+                        ],
+                        registro[
+                            "poblacion_masculina"
+                        ],
                     ]
                 },
                 index=["Mujeres", "Hombres"],
@@ -745,7 +736,9 @@ def render_localidades(df: pd.DataFrame) -> None:
             a.metric(
                 "Mujeres",
                 formato_entero(
-                    registro["poblacion_femenina"]
+                    registro[
+                        "poblacion_femenina"
+                    ]
                 ),
                 formato_porcentaje(
                     registro["pct_femenino"]
@@ -755,7 +748,9 @@ def render_localidades(df: pd.DataFrame) -> None:
             b.metric(
                 "Hombres",
                 formato_entero(
-                    registro["poblacion_masculina"]
+                    registro[
+                        "poblacion_masculina"
+                    ]
                 ),
                 formato_porcentaje(
                     registro["pct_masculino"]
@@ -764,31 +759,45 @@ def render_localidades(df: pd.DataFrame) -> None:
 
         else:
             st.warning(
-                "La fuente base no publica el conteo femenino y masculino "
-                "para esta localidad."
+                "La fuente base no publica el conteo "
+                "femenino y masculino para esta localidad."
             )
 
     with derecha:
         st.subheader("Ficha base")
 
-        st.write(
+        st.json(
             {
-                "Número en la fuente": (
+                "numero_fuente": (
                     int(registro["no"])
                     if pd.notna(registro["no"])
                     else None
                 ),
-                "ID interno PDL": registro["id_pdl"],
-                "Localidad": registro["localidad"],
-                "Población total": (
-                    int(registro["poblacion_total"])
-                    if pd.notna(registro["poblacion_total"])
+                "id_pdl": registro["id_pdl"],
+                "localidad": registro["localidad"],
+                "poblacion_total": (
+                    int(
+                        registro[
+                            "poblacion_total"
+                        ]
+                    )
+                    if pd.notna(
+                        registro[
+                            "poblacion_total"
+                        ]
+                    )
                     else None
                 ),
-                "% del total municipal": (
-                    float(registro["pct_del_total_municipal"])
+                "pct_total_municipal": (
+                    float(
+                        registro[
+                            "pct_del_total_municipal"
+                        ]
+                    )
                     if pd.notna(
-                        registro["pct_del_total_municipal"]
+                        registro[
+                            "pct_del_total_municipal"
+                        ]
                     )
                     else None
                 ),
@@ -796,16 +805,29 @@ def render_localidades(df: pd.DataFrame) -> None:
         )
 
         participacion = (
-            float(registro["pct_del_total_municipal"]) / 100
+            float(
+                registro[
+                    "pct_del_total_municipal"
+                ]
+            )
+            / 100
             if pd.notna(
-                registro["pct_del_total_municipal"]
+                registro[
+                    "pct_del_total_municipal"
+                ]
             )
             else 0
         )
 
         st.progress(
-            max(0.0, min(participacion, 1.0)),
-            text="Peso relativo dentro de la población municipal",
+            max(
+                0.0,
+                min(participacion, 1.0),
+            ),
+            text=(
+                "Peso relativo dentro de la "
+                "población municipal"
+            ),
         )
 
 
@@ -813,25 +835,30 @@ def render_localidades(df: pd.DataFrame) -> None:
 # DIAGNÓSTICO
 # =========================================================
 
-def render_diagnostico(df: pd.DataFrame) -> None:
+def render_diagnostico(
+    df: pd.DataFrame,
+) -> None:
     st.header("📊 Diagnóstico por localidad")
 
     registro = obtener_registro_activo(df)
-    nombre = registro["localidad"]
 
-    st.subheader(nombre)
+    st.subheader(registro["localidad"])
 
     c1, c2, c3, c4 = st.columns(4)
 
     c1.metric(
         "Población",
-        formato_entero(registro["poblacion_total"]),
+        formato_entero(
+            registro["poblacion_total"]
+        ),
     )
 
     c2.metric(
         "Peso municipal",
         formato_porcentaje(
-            registro["pct_del_total_municipal"]
+            registro[
+                "pct_del_total_municipal"
+            ]
         ),
     )
 
@@ -861,45 +888,53 @@ def render_diagnostico(df: pd.DataFrame) -> None:
 
     with tab1:
         st.success(
-            "Población total y participación municipal: disponibles."
+            "Población total y participación "
+            "municipal: disponibles."
         )
 
-        if bool(registro["desglose_sexo_disponible"]):
+        if bool(
+            registro[
+                "desglose_sexo_disponible"
+            ]
+        ):
             st.success(
-                "Desglose femenino/masculino: disponible."
+                "Desglose femenino/masculino: "
+                "disponible."
             )
         else:
             st.warning(
-                "Desglose femenino/masculino: incompleto en la fuente."
+                "Desglose femenino/masculino: "
+                "incompleto en la fuente."
             )
 
         st.info(
-            "Pendiente de integrar: clave INEGI, coordenadas, vivienda, "
-            "servicios, educación, salud, economía, marginación, "
-            "accesibilidad, riesgos, infraestructura y geografía electoral."
+            "Pendiente de integrar: clave INEGI, "
+            "coordenadas, vivienda, servicios, "
+            "educación, salud, economía, marginación, "
+            "accesibilidad, riesgos, infraestructura "
+            "y geografía electoral."
         )
 
     with tab2:
         st.info(
-            "La base poblacional por sí sola no permite identificar "
-            "brechas de servicios o carencias. Este apartado se activará "
-            "cuando se integren las fuentes sectoriales correspondientes."
+            "La base poblacional por sí sola no "
+            "permite identificar brechas de servicios."
         )
 
     with tab3:
         st.info(
-            "FODA territorial pendiente de evidencia documental "
-            "y levantamiento local."
+            "FODA territorial pendiente de evidencia "
+            "documental y levantamiento local."
         )
 
     with tab4:
         st.info(
-            "Árbol de problemas pendiente. No se generará automáticamente "
-            "a partir de población sin evidencia causal adicional."
+            "Árbol de problemas pendiente. No se "
+            "generará causalidad sólo desde población."
         )
 
     with tab5:
-        st.write("Fuente actualmente vinculada:")
+        st.write("Fuente vinculada:")
         st.code(str(registro["fuente"]))
 
 
@@ -907,7 +942,9 @@ def render_diagnostico(df: pd.DataFrame) -> None:
 # PLANEACIÓN
 # =========================================================
 
-def render_planeacion(df: pd.DataFrame) -> None:
+def render_planeacion(
+    df: pd.DataFrame,
+) -> None:
     st.header("📖 Planeación")
 
     registro = obtener_registro_activo(df)
@@ -921,13 +958,6 @@ def render_planeacion(df: pd.DataFrame) -> None:
         </div>
         """,
         unsafe_allow_html=True,
-    )
-
-    st.info(
-        "El CSV poblacional no contiene objetivos, estrategias, "
-        "líneas de acción ni proyectos. El módulo está preparado "
-        "para enlazarlos cuando se incorporen PDM, diagnóstico y "
-        "matrices de planeación."
     )
 
     etapas = pd.DataFrame(
@@ -957,7 +987,9 @@ def render_planeacion(df: pd.DataFrame) -> None:
 # PbR / MIR
 # =========================================================
 
-def render_pbr_mir(df: pd.DataFrame) -> None:
+def render_pbr_mir(
+    df: pd.DataFrame,
+) -> None:
     st.header("💰 PbR / MIR")
 
     registro = obtener_registro_activo(df)
@@ -970,9 +1002,8 @@ def render_pbr_mir(df: pd.DataFrame) -> None:
     c4.metric("Cumplimiento", "Pendiente")
 
     st.info(
-        "La fuente poblacional actual no contiene información PbR-SEGEMUN "
-        "ni MIR. Estos valores permanecerán como pendientes hasta integrar "
-        "programas presupuestarios, indicadores, metas y medios de verificación."
+        "La fuente poblacional actual no contiene "
+        "información PbR-SEGEMUN ni MIR."
     )
 
     st.markdown(
@@ -990,7 +1021,9 @@ def render_pbr_mir(df: pd.DataFrame) -> None:
 # GESTIÓN VIVA
 # =========================================================
 
-def render_gestion(df: pd.DataFrame) -> None:
+def render_gestion(
+    df: pd.DataFrame,
+) -> None:
     st.header("⚙️ Gestión Viva")
 
     registro = obtener_registro_activo(df)
@@ -1013,8 +1046,9 @@ def render_gestion(df: pd.DataFrame) -> None:
     )
 
     st.info(
-        "Este módulo se alimentará posteriormente con proyectos, obras, "
-        "avance físico-financiero, fotografías, georreferencia y resultados."
+        "Este módulo se alimentará con proyectos, "
+        "obras, avance físico-financiero, fotografías, "
+        "georreferencia y resultados."
     )
 
 
@@ -1026,8 +1060,11 @@ def render_datos(df: pd.DataFrame) -> None:
     st.header("🗄️ Datos y calidad")
 
     total = len(df)
+
     faltantes_sexo = int(
-        (~df["desglose_sexo_disponible"]).sum()
+        (
+            ~df["desglose_sexo_disponible"]
+        ).sum()
     )
 
     poblacion_sin_desglose = int(
@@ -1043,21 +1080,15 @@ def render_datos(df: pd.DataFrame) -> None:
 
     c1, c2, c3, c4 = st.columns(4)
 
-    c1.metric(
-        "Registros",
-        f"{total:,}",
-    )
-
+    c1.metric("Registros", f"{total:,}")
     c2.metric(
         "Fuentes declaradas",
         f"{fuentes:,}",
     )
-
     c3.metric(
         "Sin conteo por sexo",
         f"{faltantes_sexo:,}",
     )
-
     c4.metric(
         "Población sin desglose",
         f"{poblacion_sin_desglose:,}",
@@ -1067,10 +1098,16 @@ def render_datos(df: pd.DataFrame) -> None:
 
     busqueda = st.text_input(
         "Buscar localidad",
-        placeholder="Ej. Bejucos, Ixtapan, Rincón...",
+        placeholder=(
+            "Ej. Bejucos, Ixtapan, Rincón..."
+        ),
     )
 
-    max_pob = int(df["poblacion_total"].max())
+    max_pob = int(
+        df["poblacion_total"]
+        .fillna(0)
+        .max()
+    )
 
     minimo = st.slider(
         "Población mínima",
@@ -1081,7 +1118,9 @@ def render_datos(df: pd.DataFrame) -> None:
     )
 
     filtrado = df[
-        df["poblacion_total"].fillna(0).ge(minimo)
+        df["poblacion_total"]
+        .fillna(0)
+        .ge(minimo)
     ].copy()
 
     if busqueda.strip():
@@ -1112,14 +1151,18 @@ def render_datos(df: pd.DataFrame) -> None:
         hide_index=True,
     )
 
-    csv_export = filtrado[columnas].to_csv(
-        index=False
-    ).encode("utf-8-sig")
+    csv_export = (
+        filtrado[columnas]
+        .to_csv(index=False)
+        .encode("utf-8-sig")
+    )
 
     st.download_button(
         "Descargar selección CSV",
         data=csv_export,
-        file_name="localidades_tejupilco_filtradas.csv",
+        file_name=(
+            "localidades_tejupilco_filtradas.csv"
+        ),
         mime="text/csv",
     )
 
@@ -1127,26 +1170,27 @@ def render_datos(df: pd.DataFrame) -> None:
         st.write(
             f"- Localidades cargadas: **{total}**"
         )
+
         st.write(
             "- Localidades sin población total: "
             f"**{int(df['poblacion_total'].isna().sum())}**"
         )
+
         st.write(
             "- Localidades sin desglose femenino/masculino: "
             f"**{faltantes_sexo}**"
         )
-        st.write(
-            "- Habitantes asociados a registros sin desglose por sexo: "
-            f"**{poblacion_sin_desglose:,}**"
-        )
 
         inconsistencias = df[
-            df["diferencia_sexo"].fillna(0).ne(0)
+            df["diferencia_sexo"]
+            .fillna(0)
+            .ne(0)
             & df["desglose_sexo_disponible"]
         ]
 
         st.write(
-            "- Registros donde mujeres + hombres difiere de población total: "
+            "- Registros donde mujeres + hombres "
+            "difiere de población total: "
             f"**{len(inconsistencias)}**"
         )
 
@@ -1195,7 +1239,9 @@ def render_app() -> None:
     vista = vistas.get(modulo)
 
     if vista is None:
-        st.error("No se encontró el módulo solicitado.")
+        st.error(
+            "No se encontró el módulo solicitado."
+        )
         return
 
     vista(df)
@@ -1203,13 +1249,3 @@ def render_app() -> None:
 
 if __name__ == "__main__":
     render_app()
-'''
-
-out = Path("/mnt/data/app.py")
-out.write_text(app_code, encoding="utf-8")
-
-# Validación sintáctica.
-py_compile.compile(str(out), doraise=True)
-
-print(f"app.py generado y validado: {out}")
-print(f"Tamaño: {out.stat().st_size:,} bytes")
