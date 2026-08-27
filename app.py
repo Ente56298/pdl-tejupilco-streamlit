@@ -3,6 +3,11 @@ import pandas as pd
 import pydeck as pdk
 
 
+@st.cache_data
+def cargar_localidades():
+    return pd.read_csv("data/localidades.csv")
+
+
 def render_sidebar() -> str:
     """Renderiza la navegación principal del PDL."""
     with st.sidebar:
@@ -58,23 +63,10 @@ def render_inicio() -> None:
     )
 
 
-def render_territorio() -> None:
+
     st.header("🗺️ Territorio")
 
-    localidades = pd.DataFrame(
-        {
-            "localidad": [
-                "Tejupilco de Hidalgo",
-                "Bejucos",
-                "San Andrés Ocotepec",
-                "Santo Domingo-Zacatepec",
-                "Rincón de Aguirre",
-            ],
-            "lat": [18.905, 18.815, 18.940, 18.895, 18.900],
-            "lon": [-100.153, -100.420, -100.105, -100.170, -100.120],
-            "poblacion": [30967, 2437, 1826, 3220, 1700],
-        }
-    )
+    localidades = cargar_localidades()
 
     col_mapa, col_capas = st.columns([4, 1])
 
@@ -132,15 +124,49 @@ def render_localidades() -> None:
         "Catálogo maestro, fichas territoriales y comparación entre localidades."
     )
 
+    localidades = cargar_localidades()
+
     localidad = st.selectbox(
         "Localidad activa",
-        [
-            "Tejupilco de Hidalgo",
-            "Bejucos",
-            "San Andrés Ocotepec",
-            "Santo Domingo-Zacatepec",
-            "Rincón de Aguirre",
-        ],
+        localidades["nombre"].tolist(),
+        index=localidades["nombre"]
+        .tolist()
+        .index(
+            st.session_state.get(
+                "localidad_activa",
+                "Tejupilco de Hidalgo"
+            )
+        )
+        if st.session_state.get(
+            "localidad_activa",
+            "Tejupilco de Hidalgo"
+        ) in localidades["nombre"].tolist()
+        else 0,
+    )
+
+    st.session_state["localidad_activa"] = localidad
+
+    registro = localidades[
+        localidades["nombre"] == localidad
+    ].iloc[0]
+
+    st.success(f"Localidad seleccionada: {localidad}")
+
+    c1, c2, c3 = st.columns(3)
+
+    c1.metric(
+        "Población",
+        f"{int(registro['poblacion']):,}"
+    )
+
+    c2.metric(
+        "ID PDL",
+        registro["id_pdl"]
+    )
+
+    c3.metric(
+        "Estado",
+        registro["estado"]
     )
 
     st.session_state["localidad_activa"] = localidad
